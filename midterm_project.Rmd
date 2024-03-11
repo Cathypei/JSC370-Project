@@ -1,0 +1,198 @@
+---
+title: "JSC370 Midterm Project"
+author: "Cathy Pei"
+date: "2024-03-10"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(include  = TRUE)
+library(tidyverse)
+library(kableExtra)
+library(ggplot2)
+library(splines)
+library(mgcv)
+```
+
+## Introduction
+In this project, I am interested in investigating the following questions: How does the vintage of the wine relate to its rated points and price? Where were the highest rated wines made, and what types of grapes were used to make these wines? Additionally, how have these highest rated wines been described by the reviewers? The dataset I will use to explore my formulated question is a Kaggle dataset that includes wine review data, scraped from WineEnthusiast during the week of June 15th, 2017. The key variables I will investigate in this dataset include country, description, province, points, price, variety, and vintage.
+
+Specifically, I will extract the vintage from the title variable and apply a statistical model (i.e., a linear model) to determine the relationship between vintage and price, as well as vintage and points (where points represent the rated score of the taste of the wine). Afterward, I will create a new categorical variable called "rating" and classify the wines as "high rating," "median rating," or "low rating." Following that, I will filter all wines with a high rating and compare the province or country that these wines are from, as well as the type of grapes used to make them. Lastly, I will apply NLP techniques to extract keywords from descriptions of the wines with a high rating to identify their features and tastes.
+
+## Methods
+```{r, include = FALSE}
+# Import the data
+wine <- read.csv("winemag-data-130k-v2.csv")
+
+# Extract vintage from title using regex, and make a new column for it
+wine$vintage <- as.integer(gsub(".*?(\\b\\d{4}\\b).*", "\\1", wine$title))
+
+# Filter out key variables
+wine <- wine %>% select(country, description, points, price, province, vintage, variety, title)
+
+# Create new variable rating
+wine$rating <- cut(wine$points, breaks = quantile(wine$points, probs = c(0, 0.33, 0.66, 1)), labels = c("low rating", "median rating", "high rating"), include.lowest = TRUE)
+```
+I downloaded the data in a CSV file from Kaggle and imported it as a dataframe for further data cleaning processes. I extracted the vintage year from the title variable and created a new variable for it. Then, I removed redundant variables and retained only the ones necessary for my analysis. Lastly, I created the new variable "rating" based on the quantiles of the points variable.
+
+```{r include = FALSE}
+# Quick observation
+head(wine)
+tail(wine)
+summary(wine)
+```
+
+By using the `head`, `tail`, and `summary` functions, I conducted a basic exploration of the data. I observed that there are three integer-type variables: points, price, and vintage, as well as six character-type variables: country, description, province, variety, title, and rating. Furthermore, there are 8,996 missing values in price and 4,609 in vintage.
+
+```{r include = FALSE}
+# Extract vintage from the 20s if present, otherwise extract the vintage as is
+wine$vintage <- as.integer(ifelse(str_detect(wine$title, "\\b20\\d{2}\\b"), 
+                                str_extract(wine$title, "\\b20\\d{2}\\b"), 
+                                str_extract(wine$title, "\\b\\d{4}\\b")))
+
+summary(wine)
+```
+While examining outliers and potential issues in the data, I noticed that the vintage variable, extracted from the title variable, is suspicious, given its minimum of 1000 and maximum of 7200. Upon investigating specific observations, I found that this discrepancy is caused by the inclusion of the wine's name, where some wines have a vintage year in their name, but it does not necessarily represent the actual year of production. This implies the need to extract the vintage year specifically indicating when the wine was made. To address this issue, I modified the method of extracting the vintage: now, I extract the vintage from the 20s if present; otherwise, I extract the vintage as is. After this modification, the summary for the vintage variable appeared more reasonable, with a minimum of 1503 and a maximum of 2017.
+
+Furthermore, I noticed that the maximum price is 3300, whereas its median is only 25. This implies that 3300 could be a potential outlier, and we should evaluate whether it should be removed in later analysis.
+
+## Preliminary Results
+
+### Table of Summary Statistics
+There are 129,971 observations and 9 columns in the cleaned dataset. The summary statistics for the integer-type variables are shown in the table below.
+```{r echo = FALSE}
+kable(summary(wine))
+```
+
+The numbers of unique values for appropriate character-type variables are shown in the table below. Notice that there are 44 unique countries, 426 unique provinces, and 708 unique types of grapes.
+```{r echo = FALSE}
+# Check numbers of unique values for appropriate character-type variable
+unique_values_country <- length(unique(wine$country))
+unique_values_province <- length(unique(wine$province))
+unique_values_variety <- length(unique(wine$variety))
+
+combined_table <- data.frame(
+  Variable = c("Country", "Province", "Variety"),
+  Unique_Values = c(unique_values_country, unique_values_province, unique_values_variety)
+)
+
+# Print the table using kable
+kable(combined_table, col.names = c("Variable", "Unique_Values"))
+
+```
+
+## Data Visualization
+
+### Histograms for integer-type variables
+```{r echo = FALSE}
+# Histogram of points
+hist(wine$points, main = "Histogram of Rated Points for the Wines", xlab = "Points", col = "skyblue", border = "black")
+```
+
+#### Observation
+The histogram shows that the rated points for the wines are normally distributed, ranging from 80 to 100.
+
+```{r echo = FALSE}
+# Histogram of price
+hist(wine$price, main = "Histogram of Price of the Wines", xlab = "Price", col = "lightgreen", border = "black", breaks = 120)
+```
+
+#### Observation
+The histogram shows that the distribution of wine prices is extremely right-skewed. We can observe that most of the wines are priced within 500. As mentioned in the previous section, the long tail to the right in the histogram might be evidence of potential outliers. More details about the outliers can be shown in the boxplot.
+
+```{r echo = FALSE}
+# Histogram of vintage
+hist(wine$vintage, main = "Histogram of Vintage Year of the Wines", xlab = "Vintage", col = "violet", border = "black", breaks = 120)
+```
+
+#### Observation
+The histogram shows that the distribution of the vintage of the wine is extremely left-skewed. We can observe that most of the wines have a vintage year in the 2000s. The long tail to the left in the histogram might be evidence of potential outliers, which should be further evaluated in the boxplot.
+
+### Boxplots for integer-type variables
+```{r echo = FALSE}
+# Boxplot of points
+boxplot(wine$points, main = "Boxplot of Rated Points for the Wines", ylab = "Points")
+```
+
+#### Observation
+The boxplot for points looks fair; it corresponds to the conclusion we drew while investigating its histogram.
+
+```{r echo = FALSE}
+# Boxplot of price
+boxplot(wine$price, main = "Boxplot of Price of the Wines", ylab = "Price")
+```
+
+#### Observation
+The boxplot for price suggests that there are many points considered as outliers, approximately those with prices greater than 200. Since the number of outliers is significantly large, we should carefully consider whether they should be removed to avoid biasing our statistical model or analysis in further steps.
+
+```{r echo = FALSE}
+# Boxplot of vintage
+boxplot(wine$vintage, main = "Boxplot of Vintage Year of the Wines", ylab = "Vintage")
+```
+
+#### Observation
+The boxplot for vintage suggests that there are many points considered as outliers, approximately those with a vintage year earlier than 2000. Similar to what we observed in price, there is a significant number of outliers to be considered during the analysis. Notice that there are two data points that are significantly far from the box, one with a vintage year in the 1600s and one in the 1500s, which should definitely be removed when conducting the analysis.
+
+### Bar plot for appropriate categorical variables
+```{r echo = FALSE}
+# Create a bar plot for country
+ggplot(wine, aes(x = country)) +
+  geom_bar(fill = "skyblue", color = "black") +
+  labs(title = "Bar Graph of Country Where Wines are From",
+       x = "Countries",
+       y = "Review Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+#### Observation
+According to the bar plot, we can see that most of the reviews are based on wines made in the US. Some other countries whose wines have been reviewed extensively include France and Italy.
+
+```{r echo = FALSE}
+# Create a bar plot for rating
+ggplot(wine, aes(x = rating)) +
+  geom_bar(fill = "orange", color = "black") +
+  labs(title = "Bar Graph of Ratings of Wines",
+       x = "Rating",
+       y = "Review Count") +
+  theme_minimal()
+```
+
+#### Observation
+According to the bar graph of the ratings, we can observe that approximately 50,000 reviews give a low rating to a wine, approximately 45,000 reviews give a median rating to a wine, and approximately 35,000 reviews give a high rating to a wine.
+
+```{r echo = FALSE}
+# Bar plot for variety (grape types)
+
+# Calculate the frequency of each grape type
+grape_counts <- table(wine$variety)
+
+# Sort the grape types by frequency in descending order
+sorted_grapes <- names(sort(grape_counts, decreasing = TRUE))
+
+# Select the top 30 grape types
+top_30_grapes <- sorted_grapes[1:30]
+
+# Create a subset of the dataframe with only the top 30 grape types
+df_top_30_grapes <- subset(wine, variety %in% top_30_grapes)
+
+# Create a bar plot for the top 30 grape types
+ggplot(df_top_30_grapes, aes(x = variety)) +
+  geom_bar(fill = "purple", color = "black") +
+  labs(title = "Top 30 Grape Types with Highest Frequencies",
+       x = "Grape Types",
+       y = "Review Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### Observation
+According to the bar plot of variety, we can observe that most reviews are for wines made from Pinot Noir, Chardonnay, and Cabernet Franc. Note that to avoid an overcrowded graph, I have included only the top 30 grape types with the highest frequency in the data.
+
+## Summary
+In summary, our exploratory data analysis yields limited insights into our formulated question. We observe a right-skewed distribution in the prices and a left-skewed distribution in the vintages. It is noteworthy that data points with exceptionally high prices may correspond to wines with very ancient vintage years, suggesting a potential negative linear relationship between price and vintage.
+
+Given the normal distribution of points, it is challenging to observe any correlation between vintage and points without employing statistical models and conducting further analysis.
+
+Regarding the production country or province of high-rated wines, our observation that the majority of wine reviews are from the US does not necessarily imply that high-rated wines exclusively come from the US. Similarly, the common reviews on wines made from Pinot Noir do not necessarily indicate that high-rated wines share the same grape variety. Answering these questions requires more sophisticated analyses.
