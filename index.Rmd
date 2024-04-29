@@ -45,7 +45,7 @@ wine$vintage <- as.integer(ifelse(str_detect(wine$title, "\\b20\\d{2}\\b"),
                                 str_extract(wine$title, "\\b\\d{4}\\b")))
 ```
 
-#### Interactive Visualizations
+## Interactive Visualizations {.tabset}
 
 ```{r include=FALSE}
 # Plotting using plot_ly
@@ -129,8 +129,6 @@ server <- function(input, output) {
 }
 ```
 
-## Showcasing plots {.tabset}
-
 ### Figure 1: 3D Scatterplot for Vintage, Points and Price of the Wine
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
@@ -147,5 +145,3 @@ world_map
 ```{r echo=FALSE,  message=FALSE, warning=FALSE}
 shinyApp(ui = ui, server = server)
 ```
-
-{-}
