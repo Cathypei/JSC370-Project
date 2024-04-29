@@ -84,7 +84,7 @@ world_map <- plot_geo(country_counts, locations = ~country, z = ~Count, text = ~
 
 ```
 
-```{r include=FALSE, message=FALSE, warning=FALSE}
+```{r message=FALSE, warning=FALSE}
 # Add custom stopwords
 custom_stopwords <- c("wine", "flavors", "drink", "full", "now", "nose", "well", "years", "texture", "fruit", "palate", "tannins", "aromas", "finish", "acidity", "shows", "will", "notes", "offers")
 numeric_pattern <- paste0("\\b", 0:9, "\\b")
@@ -116,7 +116,7 @@ world_map
 ```
 
 ### Figure 3: Interactive Word Clouds for Most Frequent Descriptive Words Used in Wine Review
-```{r echo=FALSE,  message=FALSE, warning=FALSE}
+```{r eval= TRUE, echo=FALSE,  message=FALSE, warning=FALSE}
 sliderInput("numWords", "Number of Words in the Word Cloud:", min = 1, max = 100, value = 50)
 renderWordcloud2({
   # Select the top N words based on slider input
