@@ -14,6 +14,8 @@ The rest of the page displays three sets of interactive visualizations that corr
 ```{r eval=TRUE, include=FALSE}
 
 library(tidyverse)
+library(tidytext)
+library(tm)
 library(plotly)
 library(widgetframe)
 library(tidytext)
