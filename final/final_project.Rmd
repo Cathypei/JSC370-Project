@@ -1,0 +1,587 @@
+---
+title: "JSC370 Final Project"
+author: "Cathy Pei"
+date: "2024-04-26"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo  = FALSE, include = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(kableExtra)
+library(ggplot2)
+library(splines)
+library(mgcv)
+library(plotly)
+library(widgetframe)
+library(tidytext)
+library(dplyr)
+library(readr)
+library(wordcloud)
+library(tm)
+library(topicmodels)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(gbm)
+library(xgboost)
+library(caret)
+library(parallel)
+```
+
+# Introduction
+In this project, I aim to explore several questions: How does a wine's vintage affect its price? How are a wine's rated points correlated with its price? Additionally, how are the highest-rated and most expensive wines described by reviewers? I will also investigate the potential for predicting a wine's price using descriptive words and other characteristics. The dataset I plan to use for this inquiry comes from Kaggle and consists of wine reviews collected from WineEnthusiast during the week of June 15th, 2017. Key variables in this dataset that I will examine include country, description, points, price, variety, and vintage.
+
+More specifically, I will extract the vintage information from the title variable and apply statistical models, such as linear models, to discern the relationships between vintage and price, and between points and price, with points representing the taste rating of the wine. Subsequently, I will construct a new categorical variable named "rating," categorizing wines into "high rating," "median rating," and "low rating" groups. In a similar vein, I will categorize wines as "expensive," "medium," or "cheap" based on their price. Following this, I will employ natural language processing (NLP) techniques to identify keywords in the descriptions of highly rated wines, as well as those that are pricey, to identify their features and flavors. Finally, I will tackle the challenge of price prediction by employing various machine learning models, such as decision trees, random forests, and gradient boosting, incorporating different feature variables.
+
+# Methods
+In this section, I will clean and wrangle the dataset based on its condition, and create basic visualizations to explore the dataset.
+## Data Cleaning and Wrangling
+```{r include = FALSE}
+# Import the data
+wine <- read.csv("../data/winemag-data-130k-v2.csv")
+
+# Extract vintage from title using regex, and make a new column for it
+wine$vintage <- as.integer(gsub(".*?(\\b\\d{4}\\b).*", "\\1", wine$title))
+
+# Filter out key variables
+wine <- wine %>% select(country, description, points, price, vintage, variety, title)
+
+# Create new variable rating
+wine$rating <- cut(wine$points, breaks = quantile(wine$points, probs = c(0, 0.33, 0.66, 1)), labels = c("low rating", "median rating", "high rating"), include.lowest = TRUE)
+
+# Create new variable price_cat
+wine$price_cat <- cut(wine$price, breaks = quantile(wine$price, probs = c(0, 0.33, 0.66, 1), na.rm = TRUE), labels = c("cheap", "medium", "expensive"), include.lowest = TRUE)
+```
+
+I downloaded the data in a CSV file from Kaggle and imported it as a dataframe for further data cleaning processes. I extracted the vintage year from the title variable and created a new variable for it. Then, I removed redundant variables and retained only the ones necessary for my analysis. Lastly, I created the new variables "rating" and "price_cat" based on the quantiles of the points variable and price variables.
+
+```{r include = FALSE}
+# Quick observation
+head(wine)
+tail(wine)
+summary(wine)
+```
+
+By using the `head`, `tail`, and `summary` functions, I conducted a basic exploration of the data. I observed that there are three integer-type variables: points, price, and vintage, as well as six character-type variables: country, description, variety, title, rating, and price_cat. Furthermore, there are 8,996 missing values in price and 4,609 in vintage.
+
+```{r include = FALSE}
+# Extract vintage from the 20s if present, otherwise extract the vintage as is
+wine$vintage <- as.integer(ifelse(str_detect(wine$title, "\\b20\\d{2}\\b"), 
+                                str_extract(wine$title, "\\b20\\d{2}\\b"), 
+                                str_extract(wine$title, "\\b\\d{4}\\b")))
+
+summary(wine)
+```
+While examining outliers and potential issues in the data, I noticed that the vintage variable, extracted from the title variable, is suspicious, given its minimum of 1000 and maximum of 7200. Upon investigating specific observations, I found that this discrepancy is caused by the inclusion of the wine's name, where some wines have a vintage year in their name, but it does not necessarily represent the actual year of production. This implies the need to extract the vintage year specifically indicating when the wine was made. To address this issue, I modified the method of extracting the vintage: now, I extract the vintage from the 20s if present; otherwise, I extract the vintage as is. After this modification, the summary for the vintage variable appeared more reasonable, with a minimum of 1503 and a maximum of 2017.
+
+Furthermore, I noticed that the maximum price is 3300, whereas its median is only 25. This implies that 3300 could be a potential outlier, and we should evaluate whether it should be removed in later analysis.
+
+## Data Exploration
+There are 129,971 observations and 9 columns in the cleaned dataset. The summary statistics for the integer-type variables are shown in the table below.
+```{r}
+kable(summary(wine))
+```
+
+The numbers of unique values for appropriate character-type variables are shown in the table below. Notice that there are 44 unique countries, 426 unique provinces, and 708 unique types of grapes.
+```{r}
+# Check numbers of unique values for appropriate character-type variable
+unique_values_country <- length(unique(wine$country))
+unique_values_province <- length(unique(wine$province))
+unique_values_variety <- length(unique(wine$variety))
+
+combined_table <- data.frame(
+  Variable = c("Country", "Province", "Variety"),
+  Unique_Values = c(unique_values_country, unique_values_province, unique_values_variety)
+)
+
+# Print the table using kable
+kable(combined_table, col.names = c("Variable", "Unique_Values"))
+
+```
+
+### Data Visualization
+
+#### Histograms for integer-type variables
+```{r}
+# Histogram of points
+hist(wine$points, main = "Histogram of Rated Points for the Wines", xlab = "Points", col = "skyblue", border = "black")
+```
+
+##### Observation
+The histogram shows that the rated points for the wines are normally distributed, ranging from 80 to 100.
+
+```{r}
+# Histogram of price
+hist(wine$price, main = "Histogram of Price of the Wines", xlab = "Price", col = "lightgreen", border = "black", breaks = 120)
+```
+
+##### Observation
+The histogram shows that the distribution of wine prices is extremely right-skewed. We can observe that most of the wines are priced within 500. As mentioned in the previous section, the long tail to the right in the histogram might be evidence of potential outliers. More details about the outliers can be shown in the boxplot.
+
+```{r}
+# Histogram of vintage
+hist(wine$vintage, main = "Histogram of Vintage Year of the Wines", xlab = "Vintage", col = "violet", border = "black", breaks = 120)
+```
+
+##### Observation
+The histogram shows that the distribution of the vintage of the wine is extremely left-skewed. We can observe that most of the wines have a vintage year in the 2000s. The long tail to the left in the histogram might be evidence of potential outliers, which should be further evaluated in the boxplot.
+
+#### Boxplots for integer-type variables
+```{r}
+# Boxplot of points
+boxplot(wine$points, main = "Boxplot of Rated Points for the Wines", ylab = "Points")
+```
+
+##### Observation
+The boxplot for points looks fair; it corresponds to the conclusion we drew while investigating its histogram.
+
+```{r}
+# Boxplot of price
+boxplot(wine$price, main = "Boxplot of Price of the Wines", ylab = "Price")
+```
+
+##### Observation
+The boxplot for price suggests that there are many points considered as outliers, approximately those with prices greater than 200. Since the number of outliers is significantly large, we should carefully consider whether they should be removed to avoid biasing our statistical model or analysis in further steps.
+
+```{r}
+# Boxplot of vintage
+boxplot(wine$vintage, main = "Boxplot of Vintage Year of the Wines", ylab = "Vintage")
+```
+
+##### Observation
+The boxplot for vintage suggests that there are many points considered as outliers, approximately those with a vintage year earlier than 2000. Similar to what we observed in price, there is a significant number of outliers to be considered during the analysis. Notice that there are two data points that are significantly far from the box, one with a vintage year in the 1600s and one in the 1500s, which should definitely be removed when conducting the analysis.
+
+#### Bar plot for appropriate categorical variables
+```{r}
+# Create a bar plot for country
+ggplot(wine,  aes(x = reorder(country, country, function(x) -length(x)))) +
+  geom_bar(fill = "skyblue", color = "black") +
+  labs(title = "Bar Graph of Country Where Wines are From",
+       x = "Countries",
+       y = "Review Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+##### Observation
+According to the bar plot, we can see that most of the reviews are based on wines made in the US. Some other countries whose wines have been reviewed extensively include France and Italy.
+
+```{r}
+# Create a bar plot for rating
+ggplot(wine, aes(x = reorder(rating, rating, function(x) -length(x)))) +
+  geom_bar(fill = "orange", color = "black") +
+  labs(title = "Bar Graph of Ratings of Wines",
+       x = "Rating",
+       y = "Review Count") +
+  theme_minimal()
+```
+
+##### Observation
+According to the bar graph of the ratings, we can observe that approximately 50,000 reviews give a low rating to a wine, approximately 45,000 reviews give a median rating to a wine, and approximately 35,000 reviews give a high rating to a wine.
+
+```{r}
+# Bar plot for variety (grape types)
+
+# Calculate the frequency of each grape type
+grape_counts <- table(wine$variety)
+
+# Sort the grape types by frequency in descending order
+sorted_grapes <- names(sort(grape_counts, decreasing = TRUE))
+
+# Select the top 30 grape types
+top_30_grapes <- sorted_grapes[1:30]
+
+# Create a subset of the dataframe with only the top 30 grape types
+df_top_30_grapes <- subset(wine, variety %in% top_30_grapes)
+
+# Create a bar plot for the top 30 grape types
+ggplot(df_top_30_grapes,  aes(x = reorder(variety, variety, function(x) -length(x)))) +
+  geom_bar(fill = "purple", color = "black") +
+  labs(title = "Top 30 Grape Types with Highest Frequencies",
+       x = "Grape Types",
+       y = "Review Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+##### Observation
+According to the bar plot of variety, we can observe that most reviews are for wines made from Pinot Noir, Chardonnay, and Cabernet Sauvignon. Note that to avoid an overcrowded graph, I have included only the top 30 grape types with the highest frequency in the data.
+
+
+# Modeling and Results
+## Linear model and spline model
+To find the relationship between vintage and price, and points and price, I will create linear models and spline models to address this question.
+```{r}
+# Remove missing values
+wine_clean <- wine %>%
+  filter(!is.na(vintage) & !is.na(price) & !is.na(points))
+
+# Fit a linear model for vintage and price
+lm_vintage_price <- lm(price ~ vintage, data = wine_clean)
+summary(lm_vintage_price)
+
+# Scatterplot with fitted linear regression line
+ggplot(wine_clean, aes(x = vintage, y = price)) +
+  geom_point(alpha = 0.6) +  # Plot the points with some transparency
+  geom_smooth(method = "lm", col = "red") +  # Add a linear regression line
+  labs(title = "Scatterplot of Price vs Vintage",
+       x = "Vintage",
+       y = "Price") +
+  theme_minimal()
+```
+```{r}
+# Fit a linear model for points and price
+lm_points_price <- lm(price ~ points, data = wine_clean)
+summary(lm_points_price)
+
+# Scatterplot with fitted linear regression line
+ggplot(wine_clean, aes(x = points, y = price)) +
+  geom_point(alpha = 0.6) +  # Plot the points with some transparency
+  geom_smooth(method = "lm", col = "red") +  # Add a linear regression line
+  labs(title = "Scatterplot of Price vs Points",
+       x = "Points",
+       y = "Price") +
+  theme_minimal()
+```
+
+#### Summary on linear models
+The first linear regression output indicates that vintage is a statistically significant predictor of price, with each additional year decreasing the predicted price by approximately $0.83. However, the model's low R-squared value of 0.00739 suggests that vintage alone accounts for less than 1% of the variability in wine prices, highlighting that vintage has a minimal impact and other factors likely play a more substantial role in determining price. The large range of residuals also points to a significant amount of unexplained variability, suggesting the presence of outliers or that the relationship between vintage and price may not be linear.
+
+The second linear regression analysis suggests a strong and positive relationship between points and price, with the points a wine receives being a significant predictor of its price. For every additional point, the price is expected to increase by about $5.61. With an R-squared of 0.1722, the model explains approximately 17.22% of the variability in wine prices, which is a substantial improvement over the model with vintage. The F-statistic is highly significant, reinforcing the significance of the model. However, the residuals indicate there is still a considerable amount of unexplained variability, and the potential influence of other factors not included in the model.
+
+```{r}
+# Fit a spline model for vintage and price
+spline_vintage_price <- lm(price ~ bs(vintage), data = wine_clean)
+summary(spline_vintage_price)
+
+# Plotting for vintage and price
+plot(wine_clean$vintage, wine_clean$price, main = "Spline Fit: Vintage vs Price", xlab = "Vintage", ylab = "Price", pch = 19, col = rgb(0.1, 0.1, 0.8, 0.5))
+lines(sort(wine_clean$vintage), predict(spline_vintage_price, newdata = data.frame(vintage = sort(wine_clean$vintage))), col = "red")
+
+```
+
+```{r}
+# Fit a spline model for points and price
+spline_points_price <- lm(price ~ bs(points), data = wine_clean)
+summary(spline_points_price)
+
+# Plotting for points and price
+plot(wine_clean$points, wine_clean$price, main = "Spline Fit: Vintage vs Price", xlab = "Vintage", ylab = "Price", pch = 19, col = rgb(0.1, 0.1, 0.8, 0.5))
+lines(sort(wine_clean$points), predict(spline_points_price, newdata = data.frame(points = sort(wine_clean$points))), col = "red")
+
+```
+
+#### Summary on spline models
+In the first spline model output for predicting wine price from vintage, using basis splines, only the second spline coefficient bs(vintage)2 is statistically significant, with a p-value well below 0.05 and a t-value of 5.164. This suggests that there is a non-linear relationship between vintage and price, but only specific parts of the vintage variable (captured by bs(vintage)2) significantly contribute to predicting price. The multiple R-squared of 0.009242 indicates that the model explains only about 0.924% of the variability in wine prices, which is very low and suggests that vintage may not be a strong predictor of price by itself. The adjusted R-squared is similarly low, reinforcing the notion that other variables may be needed to better predict price. The F-statistic is significant, indicating that the model is statistically significant overall compared to a model with no predictors. However, the low R-squared values suggest that while the spline components may be capturing some aspect of the relationship, it's likely that vintage alone is not sufficient to model price effectively.
+
+The second spline model output examines the relationship between points and price using basis splines. All spline coefficients for points are statistically significant, with p-values much less than 0.05, indicating a non-linear relationship where the impact of points on price varies at different levels of points. The model has a substantial multiple R-squared of 0.2587, meaning it explains about 25.87% of the variability in wine prices, a considerable improvement compared to the spline model of vintage against price. The adjusted R-squared is also 0.2587, which after adjusting for the number of predictors in the model, still indicates a decent fit. The significant F-statistic reaffirms that the spline model is overall a strong fit compared to a model with no predictors. The large coefficients for the spline terms suggest that as points increase, their effect on price becomes more pronounced, indicating the relationship between wine scores and their prices is complex and perhaps exponential rather than linear.
+
+## NLP
+In this section, I will examine the most frequently used descriptive words that characterize highly rated and expensive wines. This analysis will involve tokenizing the words in the description variable and removing stopwords.
+
+### Highly Rated Wines
+```{r}
+# Get the subset dataframes
+high_rating_wine <- wine[wine$rating == "high rating", ]
+expensive_wine <- wine[wine$price_cat == "expensive" & !is.na(wine$price_cat), ]
+
+# Add custom stopwords
+custom_stopwords <- c("wine", "flavors", "drink", "full", "now", "nose", "well", "years", "texture", "fruit", "palate", "tannins", "aromas", "finish", "acidity", "shows", "will", "notes", "offers")
+numeric_pattern <- paste0("\\b", 0:9, "\\b")
+stop_words <- unique(c(stopwords("english"), custom_stopwords, numeric_pattern))
+
+# Tokenization for high rating wines
+# Tokenize the the words in the `description` column with the remove of stopwords
+tokens <- high_rating_wine %>%
+  select(description) %>%
+  unnest_tokens(word, description) %>%
+  mutate(word = as.character(word)) %>%  # Convert 'word' to character
+  filter(!(word %in% stop_words) & !grepl("\\b\\d+\\b", word))
+
+# Count the number of times each token appears
+token_counts <- tokens %>%
+  count(word, sort = TRUE)
+
+# Visualize the top 20 most frequent words with a bar plot
+token_counts_top20 <- head(token_counts, 20)
+
+token_counts_top20 %>%
+  ggplot(aes(x = reorder(word, n), y = n, fill = word)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Top 20 Most Frequent Words for Highly Rated Wine", x = "Words", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# Create a word cloud
+wordcloud(words = token_counts$word[1:50], freq = token_counts$n[1:50], scale = c(2.5, 0.5), colors = brewer.pal(8, "Dark2"))
+```
+
+#### Observation and Interpretation
+For highly rated wines, common descriptors include "black," "ripe," "cherry," "rich," and "spice". These terms sketch out a sensory profile that wine enthusiasts admire. "Black" often refers to the presence of dark berries, hinting at intense and desirable flavors. "Ripe" indicates grapes harvested at their peak, offering a pronounced sweetness and robust taste. "Cherry" adds a note of both sweetness and acidity, a beloved trait in many reds. "Rich" describes a velvety, full-bodied experience, with layered flavors that enchant the palate. Lastly, "spice" points to subtle, yet intricate flavors that can arise from the grape variety, the wine's origin, or the aging process, especially in oak which contributes additional aromatic qualities. Collectively, these terms portray wines with a profound and memorable flavor profile.
+
+### Expensive Wines
+```{r}
+# Tokenization for expensive wines
+# Tokenize the the words in the `description` column with the remove of stopwords
+tokens <- expensive_wine %>%
+  select(description) %>%
+  unnest_tokens(word, description) %>%
+  mutate(word = as.character(word)) %>%  # Convert 'word' to character
+  filter(!(word %in% stop_words) & !grepl("\\b\\d+\\b", word))
+
+# Count the number of times each token appears
+token_counts <- tokens %>%
+  count(word, sort = TRUE)
+
+# Visualize the top 20 most frequent words with a bar plot
+token_counts_top20 <- head(token_counts, 20)
+
+token_counts_top20 %>%
+  ggplot(aes(x = reorder(word, n), y = n, fill = word)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Top 20 Most Frequent Words for Expensive Wine", x = "Words", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# Create a word cloud
+wordcloud(words = token_counts$word[1:50], freq = token_counts$n[1:50], scale = c(2.5, 0.5), colors = brewer.pal(8, "Dark2"))
+```
+
+### Observation and Interpretation
+For expensive wines, descriptors like "black," "cherry," "ripe," "oak," and "spice" are frequently mentioned. "Black" likely refers to robust flavors of dark fruits, similar to those noted in highly rated wines, suggesting a shared appreciation for intense fruitiness. "Cherry" brings to mind a sweetness with a touch of tartness, echoing the taste profile favored in top-rated wines. "Ripe" again implies grapes at their fullest flavor potential, a common thread that denotes quality both in highly rated and costly wines. The mention of "oak" is more specific to expensive wines, indicating that the aging process in oak barrels, which imparts vanilla and woody notes, is a valued characteristic. "Spice," present in both categories, points to the complex flavors that give each sip depth and distinction. While both expensive and highly rated wines share several descriptors, the prominence of "oak" in expensive wines suggests that the aging process and its flavor contributions might play a more notable role in the luxury market.
+
+## Machine learning model
+In this section, I will train three different models to predict wine prices: a random forest, a boosting model, and a gradient boosting model. The independent variables used for prediction will include vintage, points, and descriptive words from the wine reviews. For instance, I'll transform the descriptive words into numerical data using text vectorization methods. Then, I will create models to predict price using the variables I originally have and the text vector variables. Lastly, I will assess and compare each model's performance on a testing set using Root Mean Squared Error (RMSE). Based on these evaluations, I will fine-tune the models and their hyperparameters to optimize performance.
+
+### Preparing Data
+```{r include=FALSE}
+# Sample the data
+wine_clean <- na.omit(wine)
+set.seed(123)  
+sample_indices <- sample(1:nrow(wine_clean), size = nrow(wine_clean) * 0.1)
+selected_wine <- wine_clean[sample_indices, ]
+selected_wine <- selected_wine %>%
+  mutate(document_id = row_number())
+
+# Tokenization and removing stop words
+tokens <- selected_wine %>%
+  unnest_tokens(word, description) %>%
+  mutate(word = as.character(word)) %>%
+  filter(!word %in% stop_words & !grepl("\\b\\d+\\b", word))
+
+# Count words and extract top 20 words
+top_words <- tokens %>%
+  count(word, sort = TRUE) %>%
+  top_n(20, n) %>%
+  pull(word)
+
+# Filtering tokens to keep only top words
+filtered_tokens <- tokens %>%
+  filter(word %in% top_words)
+
+# Create DTM and convert count to binary presence (1 if present, 0 if not)
+dtm <- filtered_tokens %>%
+  count(document_id, word) %>%
+  pivot_wider(names_from = word, values_from = n, values_fill = list(n = 0)) %>%
+  mutate(across(everything(), ~if_else(. > 0, 1, 0)))
+dtm <- dtm %>%
+  mutate(document_id = as.numeric(rownames(dtm)))
+
+# Join DTM with the original dataset
+selected_wine <- selected_wine %>%
+  left_join(dtm, by = "document_id") %>% select(-description, -title, -document_id, -rating, -variety, -country, -price_cat)
+#selected_wine$country <- as.factor(selected_wine$country)
+#selected_wine$variety <- as.factor(selected_wine$variety)
+
+```
+```{r}
+# Split the dataset
+set.seed(123) 
+train_index <- createDataPartition(selected_wine$price, p = 0.7, list = FALSE)
+train_data <- selected_wine[train_index, ]
+test_data <- selected_wine[-train_index, ]
+```
+This step processes the wine dataset to prepare it for machine learning analysis. Initially, all rows containing missing values are removed, and the dataset is then halved by randomly selecting 10% of the rows to preserve vector space and avoid using up all the memory in processing large data. The descriptions of the selected wines are then tokenized into individual words, converted to character type, and filtered to remove stopwords and numeric strings, focusing only on meaningful textual content. Subsequently, the top 20 most frequent meaningful words from these descriptions are identified and retained. Next, a Document-Term Matrix (DTM) is created, recording the presence of these top words in each document as binary values (1 if present, 0 if not). This DTM is then effectively merged back into the selected_wine dataset, adding the text analysis results as new features. Finally, the prepared dataset is split into training (70%) and testing (30%) sets, using a set seed for consistent splits across different runs.
+
+### Random Forest
+```{r}
+set.seed(123)
+train_data <- na.omit(train_data)
+rf_model <- randomForest(price ~ ., data = train_data, importance = TRUE)
+# Plot the variable importance
+varImpPlot(rf_model)
+```
+
+##### Interpretation
+The variable importance plot from the Random Forest model shows that 'points', representing a wine's rating, is the most significant predictor of its price, indicating a direct correlation between quality ratings and price points. 'Vintage', which denoting the year of production, also emerges as a critical factor, which aligns with the notion that the age and harvest conditions of the wine are important for valuation. Additionally, specific descriptors from wine reviews, like 'cherry', suggest that certain flavor notes are valued in the wine's market price. These insights can be pivotal for producers and sellers in understanding which aspects of a wine—its rated quality, age, and flavor profile—are most valued in the marketplace and should be emphasized in marketing and pricing strategies.
+
+### Boosting
+For the boosting model, I will conduct the boosting process with 1,000 trees, considering a range of values for the shrinkage parameter $\lambda$. Then, I'll generate a plot with various shrinkage values on the x-axis and the corresponding training set Mean Squared Error (MSE) on the y-axis to identify the optimal boosting model.
+
+```{r}
+# Define a range of lambda values to test
+lambda_values <- seq(0.01, 0.1, length.out = 5)
+mse_values <- numeric(length(lambda_values))
+
+set.seed(123)
+# Fit a model for each lambda value and calculate MSE
+for (i in seq_along(lambda_values)) {
+  gbm_model <- gbm(price ~ ., 
+                   data = train_data, 
+                   distribution = "gaussian",
+                   n.trees = 1000,
+                   shrinkage = lambda_values[i],
+                   interaction.depth = 1, 
+                   cv.folds = 5,
+                   n.minobsinnode = 10,
+                   verbose = FALSE)
+  
+  # Predict on the training set
+  preds <- predict(gbm_model, train_data, n.trees = 1000)
+  # Calculate MSE
+  mse_values[i] <- mean((preds - train_data$price)^2)
+}
+
+# Plot lambda vs MSE
+mse_plot <- data.frame(lambda = lambda_values, MSE = mse_values)
+ggplot(mse_plot, aes(x = lambda, y = MSE)) +
+  geom_line() +
+  geom_point() +
+  scale_x_continuous("Shrinkage") +
+  scale_y_continuous("Training Set MSE") +
+  ggtitle("Training MSE vs. Shrinkage Parameter")
+
+# Print the plot
+print(mse_plot)
+```
+
+#### Optimal Boosting Model
+```{r}
+# Create a variable importance plot for the model with the lowest MSE
+set.seed(123)
+optimal_lambda <- lambda_values[which.min(mse_values)]
+optimal_model_boosting <- gbm(price ~ ., 
+                     data = train_data, 
+                     distribution = "gaussian",
+                     n.trees = 1000,
+                     shrinkage = optimal_lambda,
+                     interaction.depth = 1, 
+                     n.minobsinnode = 10,
+                     verbose = FALSE)
+
+summary(optimal_model_boosting)
+```
+##### Interpretation
+The summary of the boosting model provides a quantitative measure of the importance of different variables in predicting wine prices. Clearly, 'points' is the most significant predictor by a considerable margin, underscoring its strong influence on price. 'Vintage', also plays a notable role, albeit much less than 'points'. Descriptive terms from reviews, such as 'spice', 'apple', and 'fresh', though contributing relatively minor predictive power individually, collectively offer insight into the nuanced characteristics that can affect a wine's market value. 'Blackberry', 'rich', and 'cherry' follow closely, indicating specific flavors or qualities that may appeal to consumer preferences and drive pricing. These results suggest that while quality ratings vastly dominate price predictions, the nuanced sensory descriptors and vintage also carry weight in the valuation of wine.
+
+### Gradient Boosting
+For the gradient boosting model, I will establish a grid search on the learning rate, denoted eta in this case. I'll then train models across the grid and calculate the MSE for each. Finally, I will select the optimal model, which is the one with the lowest MSE.
+```{r}
+set.seed(123)
+# Convert factors to numeric codes
+train_data <- train_data %>% mutate_if(is.factor, as.integer)
+
+# Prepare a matrix for xgboost
+predictors <- setdiff(names(train_data), "price")
+data_matrix <- xgb.DMatrix(data = as.matrix(train_data[, predictors]), label = train_data$price)
+
+# Create a training control object
+train_control <- trainControl(method = "cv", number = 5, search = "grid")
+
+# Create a tune grid
+tune_grid <- expand.grid(
+  nrounds = c(1000),  
+  max_depth = c(1,3,5,7),  
+  eta = c(0.01, 0.025, 0.05, 0.075, 0.1),  
+  gamma = 0,  
+  colsample_bytree = 0.6, 
+  min_child_weight = 1, 
+  subsample = 1
+)
+
+# Train models over the grid and calculate MSE
+results <- train(x = as.matrix(train_data[, predictors]), 
+                 y = train_data$price,
+                 trControl = train_control,
+                 tuneGrid = tune_grid,
+                 method = "xgbTree")
+
+# Extract results and plot eta vs MSE
+mse_values <- results$results$RMSE^2
+eta_values <- results$results$eta
+plot_data <- data.frame(eta = eta_values, MSE = mse_values)
+ggplot(plot_data, aes(x = eta, y = MSE)) +
+  geom_line() +
+  geom_point() +
+  xlab("Shrinkage (Eta)") +
+  ylab("Training Set MSE")
+```
+
+#### Optimal Gradient Boosting Model
+```{r}
+# Create a variable importance plot for the model with lowest MSE
+# Find the row in the results summary that has the lowest MSE
+set.seed(123)
+optimal_model_index <- which.min(results$results$RMSE)
+# Extract the optimal model's parameters
+optimal_model_params <- results$results[optimal_model_index, ]
+optimal_tune_grid <- expand.grid(
+  nrounds = optimal_model_params$nrounds,  
+  max_depth = optimal_model_params$max_depth,  
+  eta = optimal_model_params$eta,  
+  gamma = optimal_model_params$gamma,  
+  colsample_bytree = optimal_model_params$colsample_bytree, 
+  min_child_weight = optimal_model_params$min_child_weight, 
+  subsample = optimal_model_params$subsample
+)
+# Train the model using the best parameters
+optimal_model_gb <- train(
+  price ~ .,
+  data = train_data,
+  method = "xgbTree",
+  trControl = trainControl(method = "none"),  # No resampling
+  tuneGrid = optimal_tune_grid
+)
+# Create the variable importance plot
+importance <- varImp(optimal_model_gb, scale = FALSE)
+plot(importance)
+```
+
+##### Interpretation
+The gradient boosting model's summary plot illustrates the relative importance of various predictors in determining wine prices. 'Points' significantly overshadow all other variables, affirming its critical role in price prediction. 'Vintage' also appears as a key variable, suggesting that the year of production is an important factor, potentially due to the characteristics of different vintages affecting a wine's value. Descriptive terms such as 'spice' and 'blackberry' hold modest importance, indicating that specific tasting notes contribute to pricing to a lesser extent. These flavor descriptors, along with 'ripe' and 'fresh', may reflect consumer taste preferences or wine characteristics that subtly influence its market price. This plot highlights that while the subjective quality measure ('points') dominates, both the wine's age and sensory descriptors play roles in its valuation.
+
+### Model Comparison
+Finally, I will compare the performance of each model using the test RMSE to determine which one has the best performance.
+```{r}
+set.seed(123)
+test_data <- na.omit(test_data)
+# Predict price using the three models
+predictions_rf <- predict(rf_model, test_data)
+predictions_boosting<- predict(optimal_model_boosting, test_data)
+predictions_gb<- predict(optimal_model_gb, test_data)
+
+# RMSE calculations for three different models
+rmse_random_forest <- sqrt(mean((predictions_rf - test_data$price)^2))
+rmse_boosting <- sqrt(mean((predictions_boosting - test_data$price)^2))
+rmse_gradient_boosting <- sqrt(mean((predictions_gb - test_data$price)^2))
+
+# Create a data frame of RMSE values
+rmse_df <- data.frame(
+  Model = c("Random Forest", "Boosting", "Gradient Boosting"),
+  Test_RMSE = c(rmse_random_forest, rmse_boosting, rmse_gradient_boosting)
+)
+
+# Use kable to create a markdown table
+kable(rmse_df, caption = "Test RMSE for Different Models", digits = 3)
+```
+
+In this comparison, the Gradient Boosting model achieves the lowest RMSE at 30.366, suggesting it is the most accurate model among the three in predicting wine prices. The Boosting model follows closely with an RMSE of 30.722, while the Random Forest model has the highest RMSE at 31.114. This indicates that, for this particular dataset, ensemble methods with boosting techniques have a slight edge in predictive accuracy over the Random Forest approach.
+
+# Conclusion
+Throughout this analysis, I have addressed all the questions I posed at the outset. Using linear and spline models, I explored the relationship between a wine's vintage and price, as well as the relationship between its rated points and price. The models indicate a negative non-linear correlation between vintage and price and a non-linear positive relationship between points and price. However, both models suggest that they explain only a small portion of the variability in price, implying that vintage and points alone are not strong predictors of price. Moreover, by applying natural language processing techniques to wine reviews, I discovered that highly-rated wines are often described with words like "black," "ripe," "cherry," "rich," and "spice," whereas descriptors for expensive wines include "black," "cherry," "ripe," "oak," and "spice." This offers valuable insights into the language used in wine ratings. Finally, I constructed three different models to predict wine prices, incorporating vintage, points, and vectorized descriptive variables. The gradient boosting model emerged as the top performer. The variable importance plots from each model affirm that points are the most significant predictor of price, with vintage also playing a crucial role. Descriptive variables like "cherry," "sweet," and "apple" have a relatively substantial impact on price predictions, offering a nuanced understanding of how specific wine characteristics can influence market value.

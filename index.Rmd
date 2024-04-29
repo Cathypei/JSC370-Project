@@ -1,0 +1,149 @@
+---
+title: "JSC370 Final Project"
+author: "Cathy Pei"
+output: 
+    html_document:
+        toc: TRUE
+        toc_float: TRUE
+---
+
+Welcome to Cathy Pei's JSC370 Final Project website. This project seeks to explore a series of questions: How does the vintage of a wine impact its price? What is the correlation between a wine's rated points and its price? Furthermore, how do reviewers describe the highest-rated and most expensive wines? The project will also examine the feasibility of predicting a wine's price based on descriptive words and other features. The dataset employed for this investigation was sourced from Kaggle and includes wine reviews compiled from WineEnthusiast during the week of June 15th, 2017.
+
+The rest of the page displays three sets of interactive visualizations that correlate with the data.
+
+```{r eval=TRUE, include=FALSE}
+
+library(tidyverse)
+library(plotly)
+library(widgetframe)
+library(tidytext)
+library(dplyr)
+library(readr)
+library(shiny)
+library(wordcloud2)
+
+
+# Import the data
+wine <- read.csv("data/winemag-data-130k-v2.csv")
+
+# Extract vintage from title using regex, and make a new column for it
+wine$vintage <- as.integer(gsub(".*?(\\b\\d{4}\\b).*", "\\1", wine$title))
+
+# Filter out key variables
+wine <- wine %>% select(country, description, points, price, vintage, variety, title)
+
+# Create new variable rating
+wine$rating <- cut(wine$points, breaks = quantile(wine$points, probs = c(0, 0.33, 0.66, 1)), labels = c("low rating", "median rating", "high rating"), include.lowest = TRUE)
+
+# Create new variable price_cat
+wine$price_cat <- cut(wine$price, breaks = quantile(wine$price, probs = c(0, 0.33, 0.66, 1), na.rm = TRUE), labels = c("cheap", "medium", "expensive"), include.lowest = TRUE)
+
+wine$vintage <- as.integer(ifelse(str_detect(wine$title, "\\b20\\d{2}\\b"), 
+                                str_extract(wine$title, "\\b20\\d{2}\\b"), 
+                                str_extract(wine$title, "\\b\\d{4}\\b")))
+```
+
+#### Interactive Visualizations
+
+```{r include=FALSE}
+# Plotting using plot_ly
+scatterplot_3d <- plot_ly(wine, x = ~vintage, y = ~points, z = ~price,
+                          type = "scatter3d", mode = "markers",
+                          marker = list(size = 5)) %>%
+  layout(scene = list(xaxis = list(title = "Vintage"),
+                      yaxis = list(title = "Points"),
+                      zaxis = list(title = "Price")),
+         title = "3D Scatter Plot of Vintage, Points, and Price for Wines")
+```
+
+```{r include=FALSE}
+country_counts <- wine %>%
+    group_by(country) %>%
+    summarise(Count = n()) %>%
+    ungroup()
+
+# Create a world frequency map
+world_map <- plot_geo(country_counts, locations = ~country, z = ~Count, text = ~country,
+                      color = ~Count, colors = 'Purples') %>%
+    add_trace(
+        type = 'choropleth',
+        locationmode = 'country names'
+    ) %>%
+    colorbar(title = "Number of Wine Reviews") %>%
+    layout(
+        title = "Number of Reviews for Wines Produced in Each Country",
+        geo = list(
+            showframe = FALSE,
+            showcoastlines = TRUE,
+            projection = list(type = 'natural earth')
+        )
+    )
+
+```
+
+```{r include=FALSE, message=FALSE, warning=FALSE}
+# Add custom stopwords
+custom_stopwords <- c("wine", "flavors", "drink", "full", "now", "nose", "well", "years", "texture", "fruit", "palate", "tannins", "aromas", "finish", "acidity", "shows", "will", "notes", "offers")
+numeric_pattern <- paste0("\\b", 0:9, "\\b")
+stop_words <- unique(c(stopwords("english"), custom_stopwords, numeric_pattern))
+
+# Tokenization
+tokens <- wine %>%
+  select(description) %>%
+  unnest_tokens(word, description) %>%
+  mutate(word = as.character(word)) %>%  # Convert 'word' to character
+  filter(!(word %in% stop_words) & !grepl("\\b\\d+\\b", word))
+
+# Count the number of times each token appears
+token_counts <- tokens %>%
+  count(word, sort = TRUE)%>% top_n(n=100)
+```
+```{r include=FALSE}
+# Define the user interface
+ui <- fluidPage(
+  titlePanel("Interactive Word Cloud for Top Words"),
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("numWords", "Number of Words in the Word Cloud:", min = 1, max = 100, value = 50)
+    ),
+    mainPanel(
+      wordcloud2Output("wordcloud")
+    )
+  )
+)
+
+
+# Define server logic
+server <- function(input, output) {
+  
+  output$wordcloud <- renderWordcloud2({
+    # Select the top N words based on slider input
+    words_to_display <- token_counts %>%
+      head(input$numWords)
+    
+    # Generate the word cloud
+    wordcloud2(words_to_display, size = 1)  # Adjust size if needed
+  })
+}
+```
+
+## Showcasing plots {.tabset}
+
+### Figure 1: 3D Scatterplot for Vintage, Points and Price of the Wine
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+scatterplot_3d
+```
+
+### Figure 2: Number of Reviews for Wines Produced in Each Country
+
+```{r echo=FALSE,  message=FALSE, warning=FALSE}
+world_map
+```
+
+### Figure 3: Interactive Word Clouds for Most Frequent Descriptive Words Used in Wine Review
+```{r echo=FALSE,  message=FALSE, warning=FALSE}
+shinyApp(ui = ui, server = server)
+```
+
+{-}
