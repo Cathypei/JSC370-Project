@@ -1,6 +1,7 @@
 ---
 title: "JSC370 Final Project"
 author: "Cathy Pei"
+runtime: shiny
 output: 
     html_document:
         toc: TRUE

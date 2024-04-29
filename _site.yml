@@ -1,5 +1,6 @@
 name: "my-website"
 output_dir: "."
+runtime: shiny
 navbar:
   title: "My Website"
   left:
