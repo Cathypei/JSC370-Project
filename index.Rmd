@@ -101,34 +101,7 @@ tokens <- wine %>%
 token_counts <- tokens %>%
   count(word, sort = TRUE)%>% top_n(n=100)
 ```
-```{r include=FALSE}
-# Define the user interface
-ui <- fluidPage(
-  titlePanel("Interactive Word Cloud for Top Words"),
-  sidebarLayout(
-    sidebarPanel(
-      sliderInput("numWords", "Number of Words in the Word Cloud:", min = 1, max = 100, value = 50)
-    ),
-    mainPanel(
-      wordcloud2Output("wordcloud")
-    )
-  )
-)
 
-
-# Define server logic
-server <- function(input, output) {
-  
-  output$wordcloud <- renderWordcloud2({
-    # Select the top N words based on slider input
-    words_to_display <- token_counts %>%
-      head(input$numWords)
-    
-    # Generate the word cloud
-    wordcloud2(words_to_display, size = 1)  # Adjust size if needed
-  })
-}
-```
 
 ### Figure 1: 3D Scatterplot for Vintage, Points and Price of the Wine
 
@@ -144,5 +117,12 @@ world_map
 
 ### Figure 3: Interactive Word Clouds for Most Frequent Descriptive Words Used in Wine Review
 ```{r echo=FALSE,  message=FALSE, warning=FALSE}
-shinyApp(ui = ui, server = server)
+sliderInput("numWords", "Number of Words in the Word Cloud:", min = 1, max = 100, value = 50)
+renderWordcloud2({
+  # Select the top N words based on slider input
+  words_to_display <- token_counts %>% head(input$numWords)
+  
+  # Generate the word cloud
+  wordcloud2(words_to_display, size = 1)
+})
 ```
