@@ -9,6 +9,8 @@ output:
 
 Welcome to Cathy Pei's JSC370 Final Project website. This project seeks to explore a series of questions: How does the vintage of a wine impact its price? What is the correlation between a wine's rated points and its price? Furthermore, how do reviewers describe the highest-rated and most expensive wines? The project will also examine the feasibility of predicting a wine's price based on descriptive words and other features. The dataset employed for this investigation was sourced from Kaggle and includes wine reviews compiled from WineEnthusiast during the week of June 15th, 2017.
 
+Click here to download the PDF Report: [Download PDF](./final/final_project_cathypei.pdf)
+
 The rest of the page displays three sets of interactive visualizations that correlate with the data.
 
 ```{r eval=TRUE, include=FALSE}
