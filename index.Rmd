@@ -1,7 +1,6 @@
 ---
 title: "JSC370 Final Project"
 author: "Cathy Pei"
-runtime: shiny
 output: 
     html_document:
         toc: TRUE
@@ -22,8 +21,7 @@ library(widgetframe)
 library(tidytext)
 library(dplyr)
 library(readr)
-library(shiny)
-library(wordcloud2)
+library(plotly)
 
 
 # Import the data
@@ -84,22 +82,19 @@ world_map <- plot_geo(country_counts, locations = ~country, z = ~Count, text = ~
 
 ```
 
-```{r message=FALSE, warning=FALSE}
-# Add custom stopwords
-custom_stopwords <- c("wine", "flavors", "drink", "full", "now", "nose", "well", "years", "texture", "fruit", "palate", "tannins", "aromas", "finish", "acidity", "shows", "will", "notes", "offers")
-numeric_pattern <- paste0("\\b", 0:9, "\\b")
-stop_words <- unique(c(stopwords("english"), custom_stopwords, numeric_pattern))
+```{r include=FALSE, message=FALSE, warning=FALSE}
+# Aggregating data and filtering for top 100 grape types by number of reviews
+wine_summary <- wine %>%
+  group_by(variety) %>%
+  summarise(
+    NumberOfReviews = n(),
+    AveragePrice = mean(price, na.rm = TRUE),
+    AveragePoints = mean(points, na.rm = TRUE)
+  ) %>%
+  arrange(desc(NumberOfReviews)) %>%
+  slice_head(n = 100)  # Select top 100 grape types
 
-# Tokenization
-tokens <- wine %>%
-  select(description) %>%
-  unnest_tokens(word, description) %>%
-  mutate(word = as.character(word)) %>%  # Convert 'word' to character
-  filter(!(word %in% stop_words) & !grepl("\\b\\d+\\b", word))
 
-# Count the number of times each token appears
-token_counts <- tokens %>%
-  count(word, sort = TRUE)%>% top_n(n=100)
 ```
 
 
@@ -115,14 +110,14 @@ scatterplot_3d
 world_map
 ```
 
-### Figure 3: Interactive Word Clouds for Most Frequent Descriptive Words Used in Wine Review
-```{r eval= TRUE, echo=FALSE,  message=FALSE, warning=FALSE}
-sliderInput("numWords", "Number of Words in the Word Cloud:", min = 1, max = 100, value = 50)
-renderWordcloud2({
-  # Select the top N words based on slider input
-  words_to_display <- token_counts %>% head(input$numWords)
-  
-  # Generate the word cloud
-  wordcloud2(words_to_display, size = 1)
-})
+### Figure 3: Bubble Chart of Top 100 Grape types and Their Average Price and Points
+```{r  echo=FALSE,  message=FALSE, warning=FALSE}
+plot_ly(data = wine_summary, x = ~AveragePrice, y = ~AveragePoints, text = ~variety,
+        size = ~NumberOfReviews, color = ~variety,
+        sizes = c(20, 50), marker = list(opacity = 0.5)) %>%
+  layout(title = 'Bubble Chart of Top 100 Grape Types',
+         xaxis = list(title = 'Average Price'),
+         yaxis = list(title = 'Average Points'),
+         showlegend = TRUE)
+
 ```
